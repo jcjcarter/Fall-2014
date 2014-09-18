@@ -1,8 +1,8 @@
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.TreeSet;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.Stack;
@@ -13,122 +13,310 @@ import java.util.Stack;
  *
  */
 public class registerAlloc {
+  
+  //Locations starting at 32768 in data memory are reserved for the register allocator. The    
+  //allocator will store spilled values into these locations.      
+  private static int dataMemoryLoc = 32768;
 
-  //Line count for program being read
+  // Class variable for virtual and physical mappings of registers
+  private static HashMap<String, String> registerVMapped = new HashMap<String, String>();
+
+  // Class variable that keeps track of the physicals that are still live
+  private static Stack<String> registerInUse = new Stack<String>();
+
+  // Key is the register, value is the last lined used for the register
+  private static HashMap<String, String> registerLinesUsage = new HashMap<String, String>();
+
+  // Line count for program being read
   private static int programLineCount;
-  
-  //Vector class that holds the opCode, Op1, Op2, and Op3
-  //private Vector lineVectorOP;
-  
-  //The program in vector line form
+
+  // The program in vector line form
   private static HashMap<Integer, Vector> allocationActions = new HashMap<Integer, Vector>();
-  
-  // Class variable that holds the register names and the live ranges, index 0 is the start and index 1 is the end for the array
+
+  // Class variable that holds the register names and the live ranges, index 0 is the start and
+  // index 1 is the end for the array
   private static HashMap<String, int[]> registerList = new HashMap<String, int[]>();
 
-  // Class variable that holds the register names and the live ranges listed out i.e. 0, .., 100 in an arrayList
+  // Class variable that holds the register names and the live ranges listed out i.e. 0, .., 100 in
+  // an arrayList
   private static HashMap<String, ArrayList<Integer>> registerRanges =
       new HashMap<String, ArrayList<Integer>>();
-  
-  //Class variable that keeps track of X input physical registers available in a set for the bottom-up algorithm
-  private static Set<String> registerAvail = new TreeSet<String>();
-  
-  //Class variable that holds the number of live registers for each line
+
+  // Class variable that keeps track of X input physical registers available in a set for the
+  // bottom-up algorithm
+  private static Stack<String> registerAvail = new Stack<String>();
+
+  // Class variable that holds the number of live registers for each line
   private static HashMap<Integer, Integer> maxLiveHash = new HashMap<Integer, Integer>();
 
   public static void main(String[] args) {
-    // TODO Auto-generated method stub
-    // String input = "./412alloc -h 12 test_block_17.i > output_block.i";
-    String fileLocation = "/Users/Ace/Downloads/HolderJar/block1.i 22";
 
-    // fileLocation = args[0];
+    String[] inputLine = {"10", "/Users/Ace/Downloads/HolderJar/T8k.i"};
 
-    // Check to see if the parameter -h is present
-    if (hFlag(fileLocation)) {
+    //Check if the file exists
+    File f = new File(args[1]);
+    if(!f.exists() || f.isDirectory()) {
+      System.out.println("Failure to open '"+inputLine[1]+"' as the input file.");
       System.exit(0);
     }
     
-    //Look for the number of registers or throw an error if not there
-    if(!generateXRegisters(fileLocation)){
-      //REMEMBER THAT THE INPUT FROM THE COMMANDLINE WILL BE IN ARRAY#################^^^^^^^^^^^^^^^^^^@@@@@@@@@@@@@@@@@@@******************
-      System.out.println("Failure to open '–h' as the input file.");//'-h' needs to be changed to an index that corresponds to the input of the file name 
-      System.out.println("Will attempt to read from 'stdin'.");
+    // Check to see if the parameter -h is present
+    if (hFlag(args)) {
+      System.exit(0);
+    }
+
+    // Look for the number of registers or throw an error if not there
+    //String inputRegNumber = args[0];
+    if (!generateXRegisters(args[0])) {
+      //System.out.println("Will attempt to read from 'stdin'.");
       System.out.println("Cannot allocate with fewer than 2 registers.");
       System.exit(0);
     }
-    
-    /**Test to see if X registers are in the set
-    Iterator<String> allRegistersHere = registerAvail.iterator();
-    while(allRegistersHere.hasNext()){
-      System.out.println(allRegistersHere.next());
-    }*/
-    
+
+    /**
+     * Test to see if X registers are in the set Iterator<String> allRegistersHere =
+     * registerAvail.iterator(); while(allRegistersHere.hasNext()){
+     * System.out.println(allRegistersHere.next()); }
+     */
+
     // Opens the file, stores the program, and prints program
-    //CHANGE SEARCH FOR .I THEN LOOP BACK TO GET THE FILE I NAME$$$$$$$$$$$$$$$$$$$$$$$
-    readMicrosyntax(openAndRead("/Users/Ace/Downloads/HolderJar/block1.i"), programLineCount);//REMEMBER THAT THIS NEEDS TO BE CHANGED BACK TO FILELOCATION VARIABLE, ALSO ACCOUNT FOR THE ARRAY********************
+    readMicrosyntax(openAndRead(args[1]), programLineCount);//
 
-
+    /**
+     * Iterate through allocationActions, if the OpCode is Empty then skip the line. If maxLiveHash
+     * is greater than the number of registers available then spill a register. check out a virtual
+     * register to a physical register, keep track of mappings using a HashMap and pop registers
+     * from the registerAvail and placed them into the set where registerUsing. If virtual next used
+     * is empty then free the physical and place it back into registerAvail. print out the result of
+     * the vector.
+     * */
+    assignPhyRegAndPrintVector();
     System.out.println("Finished.");
   }
-  
+
+  /**
+   * Function goes through the all the vectors stored in the allocationActions, assigns physical
+   * registers, and prints to console.
+   */
+  public static void assignPhyRegAndPrintVector() {
+    int numberOfLines = allocationActions.size();
+    for (int i = 0; i < numberOfLines; i++) {
+      // If there is no opcode skip the line
+      if (allocationActions.get(i).getTheOpcode().contains("Empty")) {
+        continue;
+      }
+      // System.out.println("Line number: "+ i+ "\t" +allocationActions.get(i).getTheOpcode());
+      if ((maxLiveHash.get(i) - registerInUse.size()) > registerAvail.size()) {
+        /*
+         * Need to figure out how to handle the spilling for the
+         * registers*****************************
+         */
+        // System.out.println("Need to spill a register to memory. \t Line: " + i);
+        // continue;
+      }
+
+      if (allocationActions.get(i).getTheOpcode().contains("output")) {
+        System.out.println(allocationActions.get(i).getTheOpcode() + "\t "
+            + allocationActions.get(i).getVROp1());
+        continue;
+      }
+
+      // opCode1
+      if (allocationActions.get(i).getVROp1().contains("r")) {
+        performAllocationOP1(allocationActions.get(i).getVROp1(), i);
+      } else {
+        allocationActions.get(i).setPROp1(allocationActions.get(i).getVROp1());
+      }
+
+      // opCode2
+      if (allocationActions.get(i).getVROp2().contains("r")) {
+        performAllocationOP2(allocationActions.get(i).getVROp2(), i);
+        // check to see if the virtual register is assigned to physical register
+      } else {
+        if (allocationActions.get(i).getVROp2().contains("Empty")) {
+          allocationActions.get(i).setPROp2("");
+        } else {
+          allocationActions.get(i).setPROp2(allocationActions.get(i).getVROp2());
+        }
+      }
+
+      // opCode3
+      if (allocationActions.get(i).getVROp3().contains("r")) {
+        performAllocationOP3(allocationActions.get(i).getVROp3(), i);
+        // check to see if the virtual register is assigned to physical register
+      } else {
+
+      }
+      System.out.println(allocationActions.get(i).getTheOpcode() + "\t "
+          + allocationActions.get(i).getPROp1() + "\t " + allocationActions.get(i).getPROp2()
+          + " =>" + "\t" + allocationActions.get(i).getPROp3());
+    }
+  }
+
+  public static void performAllocationOP3(String registerName, int index) {
+    // System.out.println("Line Number: " + index);
+    // check to see if the virtual register is assigned to physical register
+    if (registerVMapped.containsKey(allocationActions.get(index).getVROp3())) {
+
+      // write the PR to opcode1 location
+      allocationActions.get(index).setPROp3(registerVMapped.get(registerName));
+
+    } else {
+      // if reg does not have a physical, assign one and write the PR to opcode1 location
+      if (registerAvail.empty()) {
+
+        // Spill to register
+        // System.out.println("spill to register");
+      } else {
+
+        String assignRegister = registerAvail.pop();
+
+        registerInUse.push(assignRegister);
+
+        registerVMapped.put(registerName, assignRegister);
+
+        // write the PR to opcode1 location
+        allocationActions.get(index).setPROp3(registerVMapped.get(registerName));
+
+      }
+
+    }
+
+  }
+
+
+  public static void performAllocationOP2(String registerName, int index) {
+
+    // check to see if the virtual register is assigned to physical register
+    if (registerVMapped.containsKey(allocationActions.get(index).getVROp2())) {
+
+      // write the PR to opcode1 location
+      allocationActions.get(index).setPROp2(registerVMapped.get(registerName));
+
+      // check to see if there is a next use
+      if (allocationActions.get(index).getNUOp2().contains("Empty")) {
+        // remove from the mapping
+        String freedRegister = registerVMapped.remove(registerName);
+        // List as available
+        registerAvail.push(freedRegister);
+        // list as no longer in use
+        registerInUse.remove(freedRegister);
+      }
+    } else {
+      // if reg does not have a physical, assign one and write the PR to opcode1 location
+      // check to see there are available registers
+      if (allocationActions.get(index).getVROp2().contains("Empty")) {
+        System.out.println("\t\t Nothing here.");
+        return;
+      }
+      if (registerAvail.empty()) {
+        // Spill to register
+      } else {
+        String assignRegister = registerAvail.pop();
+        registerInUse.push(assignRegister);
+        registerVMapped.put(registerName, assignRegister);
+
+        // write the PR to opcode1 location
+        allocationActions.get(index).setPROp2(registerVMapped.get(registerName));
+        if (allocationActions.get(index).getNUOp2().contains("Empty")) {
+          // remove from the mapping
+          String freedRegister1 = registerVMapped.remove(registerName);
+          // List as available
+          registerAvail.push(freedRegister1);
+          // list as no longer in use
+          registerInUse.remove(freedRegister1);
+        }
+      }
+
+    }
+
+  }
+
+
+  public static void performAllocationOP1(String registerName, int index) {
+
+    // check to see if the virtual register is assigned to physical register
+    if (registerVMapped.containsKey(allocationActions.get(index).getVROp1())) {
+
+      // write the PR to opcode1 location
+      allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+
+      // check to see if there is a next use
+      if (allocationActions.get(index).getNUOp1().contains("Empty")) {
+        // remove from the mapping
+        String freedRegister = registerVMapped.remove(registerName);
+        // List as available
+        registerAvail.push(freedRegister);
+        // list as no longer in use
+        registerInUse.remove(freedRegister);
+      }
+    } else {
+      // if reg does not have a physical, assign one and write the PR to opcode1 location
+      // check to see there are available registers
+      if (registerAvail.empty()) {
+        // Spill to register
+      } else {
+        String assignRegister = registerAvail.pop();
+        registerInUse.push(assignRegister);
+        registerVMapped.put(registerName, assignRegister);
+
+        // write the PR to opcode1 location
+        allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+        if (allocationActions.get(index).getNUOp1().contains("Empty")) {
+          // remove from the mapping
+          String freedRegister1 = registerVMapped.remove(registerName);
+          // List as available
+          registerAvail.push(freedRegister1);
+          // list as no longer in use
+          registerInUse.remove(freedRegister1);
+        }
+      }
+
+    }
+
+  }
+
   /**
    * Fills the arrayList for generating all the numbers between start and end
+   * 
    * @param regName
    * @param startIndex
    * @param endIndex
    */
-  public static void fillInLiveRanges(String regName, int startIndex, int endIndex){
+  public static void fillInLiveRanges(String regName, int startIndex, int endIndex) {
     ArrayList<Integer> linesLiveRange = new ArrayList<Integer>();
-    for(int i = startIndex; i <= endIndex; i++){
+    for (int i = startIndex; i <= endIndex; i++) {
       linesLiveRange.add(i);
-      //System.out.print(i +" ");
+      // System.out.print(i +" ");
     }
-    //System.out.println(regName);
+    // System.out.println(regName);
     registerRanges.put(regName, linesLiveRange);
+    registerLinesUsage.put(regName, "Empty");
     return;
   }
-  
+
   /**
-   * Parses the command line to find the number of registers to produce
-   * and places that number of registers into the class variable Set<String>
-   * holding all the registers.
+   * Parses the command line to find the number of registers to produce and places that number of
+   * registers into the class variable Set<String> holding all the registers.
+   * 
    * @param filePath
    */
-  public static boolean generateXRegisters(String filePath){
-    String strToNumber = "", regName = "pr";
-    int numIndex, numRegisters;
-    int inputLength = filePath.length();
-    for(int i = 0; i < inputLength; i++){
-      //System.out.println(filePath.charAt(i));
-      if(Character.isDigit(filePath.charAt(i))){
-        if(Character.isWhitespace(filePath.charAt(i-1))){
-          numIndex = i;
-          while(Character.isDigit(filePath.charAt(numIndex))){
-            //System.out.println("Bong: " + filePath.charAt(numIndex));
-            strToNumber += filePath.charAt(numIndex);
-            if(numIndex +1 >= inputLength){
-              break;
-            }else{
-            numIndex++;
-            }
-          }
-          //System.out.println("Bong: " + strToNumber);
-          numRegisters = Integer.parseInt(strToNumber);
-          if (numRegisters < 2){
-            System.out.println("Cannot allocate with fewer than 2 registers.");
-            System.exit(0);
-          }
-          for(int j = 0; j < numRegisters; j++){
-            regName += Integer.toString(j);
-            //add to the set
-            registerAvail.add(regName);
-            regName = "pr";
-          }
-          return true;
-        }
-      }
+  public static boolean generateXRegisters(String strInt) {
+    String regName = "pr";
+    int numRegisters;
+    numRegisters = Integer.parseInt(strInt);
+    if (numRegisters < 2) {
+      System.out.println("Cannot allocate with fewer than 2 registers.");
+      System.exit(0);
     }
-    return false;
+    for (int j = 0; j < numRegisters; j++) {
+      regName += Integer.toString(j);
+      // add to the set
+      registerAvail.add(regName);
+      registerLinesUsage.put(regName, "Empty");
+      regName = "pr";
+    }
+    return true;
   }
 
   /**
@@ -138,14 +326,18 @@ public class registerAlloc {
    * @param exitProgram
    * @return
    */
-  public static boolean hFlag(String commandLine) {
-    if (commandLine.contains("-h")) {
-
-      System.out.println(" ");
-      System.out.println("Command Syntax: "+"\n\t    412alloc k filename [-h] [-l]\n\n" + "\n Required arguments:" +"\n\t    k     specifies the number of register available" +
-      "\n\t filename  is the pathname (absolute or relative) to the input file\n\n" + "\n Optional flags:" + "\n\t    -h    prints this message" +
-          "\n\t    -l    additive flag; increases detail written to './LogFile'");
-      return true;
+  public static boolean hFlag(String[] commandLine) {
+    int arrayLen = commandLine.length;
+    for (int i = 0; i < arrayLen; i++) {
+      if (commandLine[i] == "-h") {
+        System.out.println(" ");
+        System.out.println("Command Syntax: " + "\n\t    ./412alloc k filename [-h] [-l]\n\n"
+            + "\n Required arguments:" + "\n\t    k     specifies the number of register available"
+            + "\n\t filename  is the pathname (absolute or relative) to the input file\n\n"
+            + "\n Optional flags:" + "\n\t    -h    prints this message"
+            + "\n\t    -l    additive flag; increases detail written to './LogFile'");
+        return true;
+      }
     }
     return false;
   }
@@ -169,9 +361,9 @@ public class registerAlloc {
     // lines popped from stack
     String ilocLine = "";
 
-    //Used to iterator through the registers found in the program going top down
+    // Used to iterator through the registers found in the program going top down
     Set<String> printRegList;
-    
+
     // storage of the program
     HashMap<Integer, String> dataStruct = new HashMap<Integer, String>();
 
@@ -182,9 +374,14 @@ public class registerAlloc {
       while ((line = reader.readLine()) != null) {
 
         // Skip pass the comment section of the file
-        if (line.contains("/")) {
+        if (line.contains("/") && line.charAt(0) == '/') {
+          // Check to see if the comments are skipped.
+          // System.out.println(line);//When I parse the line for registers, I am going to far.
           continue;
         }
+
+        // Put the line in the correct format
+        line = reformatLine(line);
 
         readTopDown(line, countToBottom);
         countToBottom++;
@@ -204,49 +401,193 @@ public class registerAlloc {
     String keyHere;
     while (pass.hasNext()) {
       keyHere = pass.next();
-      //System.out.println(keyHere);
-      //System.out.println("First appeared: " + registerList.get(keyHere)[0]);
-      //System.out.println("Last appeared: " + registerList.get(keyHere)[1]);
-      fillInLiveRanges(keyHere,registerList.get(keyHere)[0],registerList.get(keyHere)[1]);
+       //System.out.println(keyHere);
+       //System.out.println("First appeared: " + registerList.get(keyHere)[0]);
+       //System.out.println("Last appeared: " + registerList.get(keyHere)[1]);
+      fillInLiveRanges(keyHere, registerList.get(keyHere)[0], registerList.get(keyHere)[1]);
     }
 
-    //Produce MaxLive for Each from the top to bottom read, countToBottom -1 to account for the extra increment
-    maxLiveLines(countToBottom-1);
-    
+    // Produce MaxLive for Each from the top to bottom read, countToBottom -1 to account for the
+    // extra increment
+    maxLiveLines(countToBottom - 1);
+
     while (!lifo.isEmpty()) {
       ilocLine = (String) lifo.pop();
 
       // Fills the data structure with the ILOC Program
       dataStruct.put(stackIndex, ilocLine);
-      
-      //System.out.println(stackIndex);
+
+      // System.out.println(stackIndex);
       programLineCount = stackIndex;
       // increment counter
       stackIndex++;
     }
-    //System.out.println(programLineCount);
+    // System.out.println(programLineCount);
     return dataStruct;
   }
-  
+
+
   /**
-   * The function MaxLive updates a class variable HashMap where
-   * the key is the line and value is number of live registers.
+   * Takes in the line from the block makes the format into this:
+   * 
+   * Add r2,r3 => r4
+   * 
+   * @param lineIn
+   * @return
+   */
+  public static String reformatLine(String lineIn) {
+
+    String lineFormatted = "", buildToken = "";
+    int index = 0, strLen = lineIn.length(), commaIndex, slashIndex;
+    // System.out.println("Format this: \t" + lineIn + "\t Length: " + strLen);
+    if (strLen == 0) {
+      return lineFormatted;
+    }
+
+    // just return line if output
+    if (lineIn.contains("output")) {
+      return lineIn.trim();
+    }
+
+    // append the operation code
+    while (lineIn.charAt(index) < strLen) {
+      if (Character.isWhitespace(lineIn.charAt(index))) {
+        break;
+      }
+      lineFormatted += lineIn.charAt(index);
+      index++;
+    }
+
+    // keep moving to skip the white space
+    while (Character.isWhitespace(lineIn.charAt(index))) {
+      index++;
+    }
+
+    // get the first and second operation
+    lineFormatted += " ";
+    if (lineIn.contains(",")) {
+      commaIndex = lineIn.indexOf(',');
+      while (index <= commaIndex) {
+        lineFormatted += lineIn.charAt(index);
+        index++;
+      }
+      // go to the second register
+      while (lineIn.charAt(index) != 'r') {
+        index++;
+      }
+      // gets the second register
+      while (!Character.isWhitespace(lineIn.charAt(index))) {
+        lineFormatted += lineIn.charAt(index);
+        index++;
+      }
+      lineFormatted += " ";
+      lineFormatted += lineIn.charAt((lineIn.indexOf('=')));
+      lineFormatted += lineIn.charAt((lineIn.indexOf('>')));
+      lineFormatted += " ";
+      while (lineIn.charAt(index) != 'r') {
+        index++;
+      }
+      lineFormatted += lineIn.charAt(index);
+      index++;
+      while (Character.isDigit(lineIn.charAt(index))) {
+        lineFormatted += lineIn.charAt(index);
+        if (index + 1 < strLen) {
+          index++;
+        } else {
+          break;
+        }
+      }
+      return lineFormatted;
+    }
+
+    // for the other operations like LoadI
+
+    if (lineIn.contains("/")) {
+      slashIndex = lineIn.indexOf("/");
+      while (index < slashIndex) {
+        if (lineIn.charAt(index) == '=') {
+          lineFormatted += '=';
+          index++;
+          continue;
+        }
+        if (lineIn.charAt(index) == '>') {
+          lineFormatted += "> ";
+          index++;
+        }
+        if (!Character.isWhitespace(lineIn.charAt(index))) {
+          buildToken += lineIn.charAt(index);
+        } else {
+          lineFormatted += buildToken + " ";
+          buildToken = "";
+        }
+        index++;
+      }
+      return lineFormatted;
+    }
+
+    if (lineIn.contains("=")) {
+      slashIndex = lineIn.indexOf("=");
+      while (index <= slashIndex + 1) {
+        if (lineIn.charAt(index) == '=') {
+          lineFormatted += '=';
+          index++;
+          continue;
+        }
+        if (lineIn.charAt(index) == '>') {
+          lineFormatted += "> ";
+          index++;
+        }
+        if (!Character.isWhitespace(lineIn.charAt(index))) {
+          buildToken += lineIn.charAt(index);
+        } else {
+          lineFormatted += buildToken + " ";
+          buildToken = "";
+        }
+        index++;
+      }
+      index--;
+      while (index < strLen) {
+        if (lineIn.charAt(index) == 'r') {
+          lineFormatted += 'r';
+          index++;
+          while (Character.isDigit(lineIn.charAt(index))) {
+            lineFormatted += lineIn.charAt(index);
+            if (index + 1 < strLen) {
+              index++;
+            } else {
+              break;
+            }
+          }
+          break;
+        }
+        index++;
+      }
+      return lineFormatted;
+    }
+
+    return lineFormatted;
+  }
+
+  /**
+   * The function MaxLive updates a class variable HashMap where the key is the line and value is
+   * number of live registers.
+   * 
    * @param programLength
    */
-  public static void maxLiveLines(int programLength){
+  public static void maxLiveLines(int programLength) {
     int liveRegistersCounted = 0;
 
-    for(int i = programLength; i>= 0; i--){
-      Set <String> listedRegistersSet = registerList.keySet();
+    for (int i = programLength; i >= 0; i--) {
+      Set<String> listedRegistersSet = registerList.keySet();
       Iterator<String> listedRegister = listedRegistersSet.iterator();
-      while(listedRegister.hasNext()){
-        if(registerRanges.get(listedRegister.next()).contains(i)){
-          //System.out.println(i);
+      while (listedRegister.hasNext()) {
+        if (registerRanges.get(listedRegister.next()).contains(i)) {
+          // System.out.println(i);
           liveRegistersCounted++;
         }
       }
-      //System.out.println("Line Number: "+ i);
-      //System.out.println("\t Number of live Registers: " + liveRegistersCounted);
+      // System.out.println("Line Number: "+ i);
+      // System.out.println("\t Number of live Registers: " + liveRegistersCounted);
       maxLiveHash.put(i, liveRegistersCounted);
       liveRegistersCounted = 0;
     }
@@ -259,14 +600,29 @@ public class registerAlloc {
    * @param textLine
    */
   public static void readTopDown(String textLine, int lineIndex) {
+    //System.out.println("Reading this Line: \t" + textLine);
     String buildToken = "";
+    int strLen = textLine.length();
     // Holds the start
-    for (int i = 0; i < textLine.length(); i++) {
+    for (int i = 0; i < strLen; i++) {
+      // step through the tokens as they build
+      // System.out.println(textLine.charAt(i));
       if (Character.isWhitespace(textLine.charAt(i)) != true) {
+        /*
+         * if (textLine.charAt(i) == '=') { if (textLine.charAt(i + 1) == '>') {
+         * System.out.println(textLine.charAt(i + 2)); break; } }
+         */
         buildToken += textLine.charAt(i);
         // System.out.println(textLine.charAt(i));
+        if(i+1 == strLen){
+          liveRanges(buildToken,lineIndex);
+        }
         continue;
+        
       }
+      // display the token built
+      // System.out.println(buildToken);
+
       // Live ranges for all the registers in the program
       liveRanges(buildToken, lineIndex);
 
@@ -286,8 +642,9 @@ public class registerAlloc {
     // index of the comma in a operation
     int commaIndex;
     String firstReg = "", secondReg = "";
-
     if (tokenWord != "") {
+
+      //System.out.println("Token passed in: " + tokenWord);
       if (tokenWord.length() >= 2) {
         if (tokenWord.contains(",")) {
           commaIndex = tokenWord.indexOf(",");
@@ -311,7 +668,7 @@ public class registerAlloc {
               // the last occurrance of the register in the program
               regIndices[1] = lineIndex;
               registerList.put(firstReg, regIndices);
-              // System.out.println("First found: "+ buildToken + " at Line: " + lineIndex);
+              System.out.println("First found: "+ tokenWord + " at Line: " + lineIndex);
             } else {
               regIndices = new int[2];
               // the first occurrance of the register in the program
@@ -323,31 +680,35 @@ public class registerAlloc {
               // System.out.println("Updated: "+ buildToken + " at Line: " + lineIndex);
             }
           }
-          /*
-           * Takes care of the second register in updating the live range
-           */
-          if (secondReg.charAt(0) == 'r' && testForRegNum(secondReg.charAt(1))) {
 
-            if (!registerList.containsKey(secondReg)) {
-              regIndices = new int[2];
-              // the first occurrance of the register in the program
-              regIndices[0] = lineIndex;
-              // the last occurrance of the register in the program
-              regIndices[1] = lineIndex;
-              registerList.put(secondReg, regIndices);
-              // System.out.println("First found: "+ buildToken + " at Line: " + lineIndex);
-              return;
-            } else {
-              regIndices = new int[2];
-              // the first occurrance of the register in the program
-              regIndices[0] = registerList.get(secondReg)[0];
-              // the last occurrance of the register in the program
-              regIndices[1] = lineIndex;
-              // update the indices list
-              registerList.put(secondReg, regIndices);
-              // System.out.println("Updated: "+ buildToken + " at Line: " + lineIndex);
-              return;
-            }
+          // Make sure we do not go out of bounds
+          if (secondReg.length() > 1) {
+            /*
+             * Takes care of the second register in updating the live range
+             */
+            if (secondReg.charAt(0) == 'r' && testForRegNum(secondReg.charAt(1))) {
+
+              if (!registerList.containsKey(secondReg)) {
+                regIndices = new int[2];
+                // the first occurrance of the register in the program
+                regIndices[0] = lineIndex;
+                // the last occurrance of the register in the program
+                regIndices[1] = lineIndex;
+                registerList.put(secondReg, regIndices);
+                 //System.out.println("First found: "+ tokenWord + " at Line: " + lineIndex);
+                return;
+              } else {
+                regIndices = new int[2];
+                // the first occurrance of the register in the program
+                regIndices[0] = registerList.get(secondReg)[0];
+                // the last occurrance of the register in the program
+                regIndices[1] = lineIndex;
+                // update the indices list
+                registerList.put(secondReg, regIndices);
+                // System.out.println("Updated: "+ buildToken + " at Line: " + lineIndex);
+                return;
+              }
+            }// end of of rXX if-statement
           }
         }// end of if-statement testing for a comma
       }
@@ -363,7 +724,8 @@ public class registerAlloc {
             // the last occurrance of the register in the program
             regIndices[1] = lineIndex;
             registerList.put(tokenWord, regIndices);
-            // System.out.println("First found: "+ buildToken + " at Line: " + lineIndex);
+            //System.out.println("First found: "+ tokenWord + " at Line: " + lineIndex);
+            return;
           } else {
             regIndices = new int[2];
             // the first occurrance of the register in the program
@@ -373,6 +735,7 @@ public class registerAlloc {
             // update the indices list
             registerList.put(tokenWord, regIndices);
             // System.out.println("Updated: "+ buildToken + " at Line: " + lineIndex);
+            return;
           }
         }
       }
@@ -401,57 +764,106 @@ public class registerAlloc {
    * 
    * @param alphabet
    */
-  public static void readMicrosyntax(HashMap<Integer, String> storedData, int numberOfLinesCounted) {//numberOfLinesCounted is used as the Key for allocationActions as lines, must be decremented
-    String buildToken = "", textLine = "";
-    // char[] alphaChars = {'s','t','o','r','e',
-    // 'l','a','d','I',',','h','i','f','u','b','p','n','m','=','>','0','1','2','3','4','5','6','7','8','9'};
-    //System.out.println("In the readMirco function: " + numberOfLinesCounted);
+  public static void readMicrosyntax(HashMap<Integer, String> storedData, int numberOfLinesCounted) {// numberOfLinesCounted
+                                                                                                     // is
+                                                                                                     // used
+                                                                                                     // as
+                                                                                                     // the
+                                                                                                     // Key
+                                                                                                     // for
+                                                                                                     // allocationActions
+                                                                                                     // as
+                                                                                                     // lines,
+                                                                                                     // must
+                                                                                                     // be
+                                                                                                     // decremented
+    String buildToken = "", textLine = "", previousWord = "";
+    Vector lineVectorOP;
+
+    // System.out.println("In the readMirco function: " + numberOfLinesCounted);
     for (int j = 0; j < storedData.size(); j++) {
-      //Vector class that holds the opCode, Op1, Op2, and Op3
-      Vector lineVectorOP = new Vector();
+      // Vector class that holds the opCode, Op1, Op2, and Op3
+      lineVectorOP = new Vector();
       textLine = storedData.get(j);
       // Prints out all the lines in the stack from the bottom up
-       //System.out.println(textLine);
+      // System.out.println(textLine);
       for (int i = 0; i < textLine.length(); i++) {
 
-        if (testForCharacters(textLine.charAt(i))&& i+1 < textLine.length()&& !Character.isWhitespace(textLine.charAt(i+1))) {
+        if (testForCharacters(textLine.charAt(i)) && i + 1 < textLine.length()
+            && !Character.isWhitespace(textLine.charAt(i + 1))) {
           buildToken += textLine.charAt(i);
           continue;
-        }else{
-          buildToken+= textLine.charAt(i);
+        } else {
+          buildToken += textLine.charAt(i);
         }
-        if (buildToken != ""&& !buildToken.contains("\n") &&!buildToken.contains("\t")&&!buildToken.contains(" ")) {
+        if (buildToken != "" && !buildToken.contains("\n") && !buildToken.contains("\t")
+            && !buildToken.contains(" ")) {
           // Prints out all the tokens in the line
-           System.out.println(buildToken);
-           /**
-            * Now I need to write functions that will taken in buildToken as a String parameter and
-            * return booleans if that string fits the description. If the boolean is true then I need
-            * fill in the vector for the corresponding operation. If there is a comma present, write
-            * a method for that.
-            **/
+          // System.out.println(buildToken);
+
+          /**
+           * Now I need to write functions that will taken in buildToken as a String parameter and
+           * return booleans if that string fits the description. If the boolean is true then I need
+           * fill in the vector for the corresponding operation. If there is a comma present, write
+           * a method for that. Completed.
+           **/
+          previousWord =
+              sortMicrosyntax(buildToken, previousWord, lineVectorOP, numberOfLinesCounted);
+
         }
+        // previousWord = "";
+        // previousWord.concat(buildToken);// += buildToken;
         buildToken = "";
       }
+      // System.out.println(lineVectorOP.getTheOpcode()+"\t"+
+      // lineVectorOP.getVROp1()+"\t Next Used On Line: \t"+lineVectorOP.getNUOp1());
       allocationActions.put(numberOfLinesCounted, lineVectorOP);
-    //numberOfLinesCounted is used as the Key for allocationActions as lines, must be decremented
+      // numberOfLinesCounted is used as the Key for allocationActions as lines, must be decremented
       numberOfLinesCounted--;
-      System.out.println("\tEnd of the line...");
+      // System.out.println("\tEnd of the line...");
     }
     return;
-    // cases for load, loadI, and lshift
-    // lMicrosyntax(textLine.charAt(i));
-    // case for store (sub?)
-    // sMicrosyntax(textLine.charAt(i));
-    // case for output
-    // case for nop
-    // case for add
-    // case for mult
-    // case for rshift (r00?)
-    // case for constant
-    // case for ","
-    // case for "=>"
+
   }
 
+  /**
+   * Retrieves the second operation from the string.
+   * 
+   * @param second
+   * @return
+   */
+  public static String secondOperation(String second) {
+    String value = "";
+    int index = second.indexOf(',') + 1;
+    while (index < second.length()) {
+      value += second.charAt(index);
+      index++;
+    }
+    return value;
+  }
+
+  /**
+   * Retrieves the first operation from the string.
+   * 
+   * @param first
+   * @return
+   */
+  public static String firstOperation(String first) {
+    String value = "";
+    int index = 0;
+    while (first.charAt(index) != ',') {
+      value += first.charAt(index);
+      index++;
+    }
+    return value;
+  }
+
+  /**
+   * Checks to see if the character corresponds to a microsyntax.
+   * 
+   * @param Character
+   * @return
+   */
   public static boolean testForCharacters(char Character) {
     char[] alphaChars =
         {'s', 't', 'o', 'r', 'e', 'l', 'a', 'd', 'I', ',', 'h', 'i', 'f', 'u', 'b', 'p', 'n', 'm',
@@ -464,120 +876,90 @@ public class registerAlloc {
     return false;
   }
 
-
   /**
-   * Finds the microsyntax load and loadl.
+   * Checks to if the input is a memory location.
    * 
-   * @param alphabet
+   * @param constant
+   * @return
    */
-  public static void lMicrosyntax(char alphabet) {
-    String tokenWord2 = "";
-    if (alphabet == 'l' && tokenWord2 == "") {
-      tokenWord2 += alphabet;
-      // System.out.println("Found this l: " + alphabet);
-      // System.out.println("The token word:" + tokenWord +"2");
-      return;
-    }
-    if (alphabet == 's' && tokenWord2 == "l") {
-      tokenWord2 += alphabet;
-      // System.out.println("Found this s: " + alphabet);
-      System.out.println("The token word: " + tokenWord2);
-      return;
-    }
-    if (alphabet == 'h' && tokenWord2 == "ls") {
-      tokenWord2 += alphabet;
-      System.out.println("Found this h: " + alphabet);
-      // System.out.println("The token word: " + tokenWord);
-      return;
-    }
-    if (alphabet == 'i' && tokenWord2 == "lsh") {
-      tokenWord2 += alphabet;
-      System.out.println("Found this i: " + alphabet);
-      System.out.println("The token word: " + tokenWord2);
-      return;
-    }
-    if (alphabet == 'f' && tokenWord2 == "lshi") {
-      tokenWord2 += alphabet;
-      System.out.println("Found this f: " + alphabet);
-      System.out.println("The token word: " + tokenWord2);
-      return;
-    }
-    if (alphabet == 't' && tokenWord2 == "lshif") {
-      tokenWord2 += alphabet;
-      System.out.println("Found this t: " + alphabet);
-      System.out.println("The token word: " + tokenWord2);
-      return;
-    }
-    // token word lshift should be found
-    if (alphabet == '\t' || alphabet == ' ') {
-      if (tokenWord2 == "lshift") {
-        System.out.println(tokenWord2);
-        tokenWord2 = "";
-        return;
+  public static boolean testForConstants(String constant) {
+    int stringLeng = constant.length();
+    for (int i = 0; i < stringLeng; i++) {
+      if (!Character.isDigit(constant.charAt(i))) {
+        return false;
       }
     }
-    if (alphabet == 'o' && tokenWord2 == "l") {
-      tokenWord2 += alphabet;
-      return;
-    }
-    if (alphabet == 'a' && tokenWord2 == "lo") {
-      tokenWord2 += alphabet;
-      return;
-    }
-    if (alphabet == 'd' && tokenWord2 == "loa") {
-      tokenWord2 += alphabet;
-      return;
-    }
-    // token word load should be found
-    if (alphabet == '\t' || alphabet == ' ') {
-      if (tokenWord2 == "load") {
-        System.out.println(tokenWord2);
-        tokenWord2 = "";
-        return;
-      }
-    }
-    if (alphabet == 'I' && tokenWord2 == "load") {
-      tokenWord2 += alphabet;
-      return;
-    }
-    // token word loadI should be found
-    if (alphabet == '\t' || alphabet == ' ') {
-      if (tokenWord2 == "loadI") {
-        System.out.println(tokenWord2);
-        tokenWord2 = "";
-        return;
-      }
-    }
-    return;
+    return true;
   }
 
   /**
-   * Finds the microsyntax store.
+   * Finds the microsyntax for the operation code.
    * 
    * @param alphabet
    */
-  public static void sMicrosyntax(char alphabet) {
-    String tokenWord = "";
-    if (alphabet == 's' && tokenWord == "") {
-      tokenWord += alphabet;
-      return;
+  public static boolean OpcodeSyntax(String OpcodeSyn) {
+    String[] OperationCodes =
+        {"load", "loadI", "store", "lshift", "sub", "output", "nop", "add", "mult", "rshift"};
+    int arrayLength = OperationCodes.length;
+    for (int i = 0; i < arrayLength; i++) {
+      if (OpcodeSyn.contains(OperationCodes[i])) {
+        return true;
+      }
     }
-    if (alphabet == 't' && tokenWord == "s") {
-      tokenWord += alphabet;
-      return;
-    }
-    if (alphabet == 'o' && tokenWord == "st") {
-      tokenWord += alphabet;
-      return;
-    }
-    if (alphabet == 'r' && tokenWord == "sto") {
-      tokenWord += alphabet;
-      return;
-    }
-    if (alphabet == 'e' && tokenWord == "stor") {
-      tokenWord += alphabet;
-      return;
-    }
-    return;
+    return false;
   }
+
+  /**
+   * Sorts the microsyntax into the vector.
+   * 
+   * @param alphabet
+   */
+  public static String sortMicrosyntax(String buildToken, String previousWord, Vector lineVectorOP,
+      int lineNumber) {
+    if (OpcodeSyntax(buildToken)) {
+      lineVectorOP.setTheOpcode(buildToken);
+      // System.out.println(buildToken);
+      return buildToken;
+    }
+    if (testForConstants(buildToken)) {
+      lineVectorOP.setVROp1(buildToken);
+      return buildToken;
+    }
+    if (buildToken.contains(",")) {
+      /**
+       * Need to mark where I have seen the registers in the code.
+       * */
+      lineVectorOP.setVROp1(firstOperation(buildToken));
+      // get the line used
+      lineVectorOP.setNUOp1(registerLinesUsage.get(firstOperation(buildToken)));
+      // set the line used
+      registerLinesUsage.put(firstOperation(buildToken), Integer.toString(lineNumber));
+      lineVectorOP.setVROp2(secondOperation(buildToken));
+      // get the line used
+      lineVectorOP.setNUOp2(registerLinesUsage.get(secondOperation(buildToken)));
+      // set the line used
+      registerLinesUsage.put(secondOperation(buildToken), Integer.toString(lineNumber));
+      return buildToken;
+    }
+    if (buildToken.charAt(0) == 'r') {
+      // System.out.println(buildToken);
+      // System.out.println(previousWord);
+      if (previousWord.contains("=>")) {
+        lineVectorOP.setVROp3(buildToken);
+        // get the line used
+        lineVectorOP.setNUOp3(registerLinesUsage.get(buildToken));
+        // set the line used
+        registerLinesUsage.put(buildToken, Integer.toString(lineNumber));
+      } else {
+        lineVectorOP.setVROp1(buildToken);
+        // get the line used
+        lineVectorOP.setNUOp1(registerLinesUsage.get(buildToken));
+        // set the line used
+        registerLinesUsage.put(buildToken, Integer.toString(lineNumber));
+      }
+      return buildToken;
+    }
+    return buildToken;
+  }
+
 }
