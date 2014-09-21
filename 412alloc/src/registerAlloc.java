@@ -4,6 +4,7 @@ import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
@@ -14,11 +15,14 @@ import java.util.Stack;
  */
 public class registerAlloc {
   
+  //Mapping to Register's furtherest next use
+  private static HashMap<String, String> registerNextU = new HashMap<String, String>();
+  
   //Locations starting at 32768 in data memory are reserved for the register allocator. The    
   //allocator will store spilled values into these locations.      
   private static int dataMemoryLoc = 32768;
 
-  // Class variable for virtual and physical mappings of registers
+  // Class variable for virtual and physical mappings of registers, KEY = virtural register VALUE = Physical Register
   private static HashMap<String, String> registerVMapped = new HashMap<String, String>();
 
   // Class variable that keeps track of the physicals that are still live
@@ -51,12 +55,12 @@ public class registerAlloc {
 
   public static void main(String[] args) {
 
-    String[] inputLine = {"10", "/Users/Ace/Downloads/HolderJar/T8k.i"};
+    String[] inputLine = {"5", "/Users/Ace/Downloads/HolderJar/block1.i"};
 
     //Check if the file exists
     File f = new File(args[1]);
     if(!f.exists() || f.isDirectory()) {
-      System.out.println("Failure to open '"+inputLine[1]+"' as the input file.");
+      System.out.println("Failure to open '"+args[1]+"' as the input file.");
       System.exit(0);
     }
     
@@ -80,7 +84,7 @@ public class registerAlloc {
      */
 
     // Opens the file, stores the program, and prints program
-    readMicrosyntax(openAndRead(args[1]), programLineCount);//
+    readMicrosyntax(openAndRead(args[1]), programLineCount);
 
     /**
      * Iterate through allocationActions, if the OpCode is Empty then skip the line. If maxLiveHash
@@ -91,7 +95,51 @@ public class registerAlloc {
      * the vector.
      * */
     assignPhyRegAndPrintVector();
+    
+    
     System.out.println("Finished.");
+  }
+  
+  public static void changeVRegisterMappings(HashMap<String, String> map, String SwapRegister, String MemoryLocation){
+    Iterator it = map.entrySet().iterator();
+    while (it.hasNext()) {
+      Map.Entry<String,String> pairs = (Map.Entry)it.next();
+      //If a register currently does not have a next use, return that register.
+      if(pairs.getValue() == SwapRegister){
+        map.put(pairs.getKey(), MemoryLocation);
+        break;
+      }
+  }
+    }
+  
+  /**
+   * @param map: registerNextU which is hash where Key = Physical Register and Value = Next Line number used
+   * @return
+   */
+  public static String iterateRegisterNextU(HashMap<String, String> map){
+    //Test to see if all the registers are there.
+    //System.out.println("\t Number of Registers here: \t" + map.size());
+    int furtherestUse = -100, compareNum = -1000;
+    String furtherestReg = "ERROR";
+    Iterator it = map.entrySet().iterator();
+    //search for a register that has the furtherest next used
+    while (it.hasNext()) {
+        Map.Entry<String,String> pairs = (Map.Entry)it.next();
+        //If a register currently does not have a next use, return that register.
+        if(pairs.getValue().contains("Empty")){
+          //System.out.println(pairs.getKey() + " = " + pairs.getValue());
+          return pairs.getKey();
+        }
+        //Keep track of the furtherest register
+        compareNum = Integer.parseInt(pairs.getValue());
+        if(compareNum > furtherestUse){
+          furtherestUse = compareNum;
+          furtherestReg = pairs.getKey();
+          //System.out.println(pairs.getKey() + " = " + pairs.getValue());
+        }
+
+    }
+    return furtherestReg;
   }
 
   /**
@@ -99,6 +147,7 @@ public class registerAlloc {
    * registers, and prints to console.
    */
   public static void assignPhyRegAndPrintVector() {
+    String physicalRegister = "", virtualRegister = "";
     int numberOfLines = allocationActions.size();
     for (int i = 0; i < numberOfLines; i++) {
       // If there is no opcode skip the line
@@ -113,6 +162,9 @@ public class registerAlloc {
          */
         // System.out.println("Need to spill a register to memory. \t Line: " + i);
         // continue;
+        
+        //select the PR whose next use is furtherest in the future
+        
       }
 
       if (allocationActions.get(i).getTheOpcode().contains("output")) {
@@ -125,6 +177,7 @@ public class registerAlloc {
       if (allocationActions.get(i).getVROp1().contains("r")) {
         performAllocationOP1(allocationActions.get(i).getVROp1(), i);
       } else {
+        //This signifies that the OP1 is doing an operation from memory
         allocationActions.get(i).setPROp1(allocationActions.get(i).getVROp1());
       }
 
@@ -141,25 +194,72 @@ public class registerAlloc {
       }
 
       // opCode3
-      if (allocationActions.get(i).getVROp3().contains("r")) {
-        performAllocationOP3(allocationActions.get(i).getVROp3(), i);
+      virtualRegister = allocationActions.get(i).getVROp3();
+      if (virtualRegister.contains("r")) {//allocationActions.get(i).getVROp3()
+        if(registerVMapped.containsKey(virtualRegister)){
+        if(!registerVMapped.get(virtualRegister).contains("r")){
+        //Pick the register with the furtherest next use
+          physicalRegister = iterateRegisterNextU(registerNextU);
+          
+          //Change the mapping for register Change
+          changeVRegisterMappings(registerVMapped, physicalRegister,Integer.toString(dataMemoryLoc));
+          
+          
+          //Spill the contents of the furtherest register to memory
+          System.out.println("LoadI \t" + dataMemoryLoc + "\t \t => \t " + physicalRegister + "\t //Spill (k is minimal)");
+          dataMemoryLoc += 4;
+          
+        //Change the mappings for the virtual and physical register
+          registerVMapped.put(virtualRegister, physicalRegister);
+          allocationActions.get(i).setPROp3(registerVMapped.get(virtualRegister));
+
+        }
+        }
+        performAllocationOP3(virtualRegister, i);//allocationActions.get(i).getVROp3()
         // check to see if the virtual register is assigned to physical register
       } else {
+      //Pick the register with the furtherest next use
+        physicalRegister = iterateRegisterNextU(registerNextU);
+        
+        //Change the mapping for register Change
+        changeVRegisterMappings(registerVMapped, physicalRegister,Integer.toString(dataMemoryLoc));
+        
+        
+        //Spill the contents of the furtherest register to memory
+        System.out.println("LoadI \t" + dataMemoryLoc + "\t \t => \t " + physicalRegister + "\t //Spill (k is minimal)");
+        dataMemoryLoc += 4;
+        
+      //Change the mappings for the virtual and physical register
+        registerVMapped.put(virtualRegister, physicalRegister);
+        allocationActions.get(i).setPROp3(registerVMapped.get(virtualRegister));
 
       }
+      
+      //Prints out the lines for the standard output
       System.out.println(allocationActions.get(i).getTheOpcode() + "\t "
           + allocationActions.get(i).getPROp1() + "\t " + allocationActions.get(i).getPROp2()
           + " =>" + "\t" + allocationActions.get(i).getPROp3());
+      
+
+      //Test check the values in registerNextU
+      //System.out.println("Line number: \t" + i);
+      //printMap(registerNextU);
+      //System.out.println("This is the furtherest Register: \t"+iterateRegisterNextU(registerNextU));
+      //System.out.println("Line number: \t" + i);
     }
   }
 
   public static void performAllocationOP3(String registerName, int index) {
+    String registerChange = "SwitchRegister";
     // System.out.println("Line Number: " + index);
     // check to see if the virtual register is assigned to physical register
     if (registerVMapped.containsKey(allocationActions.get(index).getVROp3())) {
 
       // write the PR to opcode1 location
       allocationActions.get(index).setPROp3(registerVMapped.get(registerName));
+      
+      //update the next use for the register in the hashmap
+      registerNextU.put(registerVMapped.get(registerName), allocationActions.get(index).getNUOp3());
 
     } else {
       // if reg does not have a physical, assign one and write the PR to opcode1 location
@@ -167,6 +267,21 @@ public class registerAlloc {
 
         // Spill to register
         // System.out.println("spill to register");
+        
+      //Pick the register with the furtherest next use
+        registerChange = iterateRegisterNextU(registerNextU);
+        
+        //Change the mapping for register Change
+        changeVRegisterMappings(registerVMapped, registerChange,Integer.toString(dataMemoryLoc));
+        
+        
+        //Spill the contents of the furtherest register to memory
+        System.out.println("LoadI \t" + dataMemoryLoc + " => " + registerChange + "\t //Spill (k is minimal)");
+        dataMemoryLoc += 4;
+        
+      //Change the mappings for the virtual and physical register
+        registerVMapped.put(registerName, registerChange);
+        allocationActions.get(index).setPROp3(registerVMapped.get(registerName));
       } else {
 
         String assignRegister = registerAvail.pop();
@@ -177,6 +292,9 @@ public class registerAlloc {
 
         // write the PR to opcode1 location
         allocationActions.get(index).setPROp3(registerVMapped.get(registerName));
+        
+        //update the next use for the register in the hashmap
+        registerNextU.put(registerVMapped.get(registerName), allocationActions.get(index).getNUOp3());
 
       }
 
@@ -186,13 +304,16 @@ public class registerAlloc {
 
 
   public static void performAllocationOP2(String registerName, int index) {
-
+String registerChange = "MoveRegister";
     // check to see if the virtual register is assigned to physical register
     if (registerVMapped.containsKey(allocationActions.get(index).getVROp2())) {
 
       // write the PR to opcode1 location
       allocationActions.get(index).setPROp2(registerVMapped.get(registerName));
 
+      //update the next use for the register in the hashmap
+      registerNextU.put(registerVMapped.get(registerName), allocationActions.get(index).getNUOp2());
+      
       // check to see if there is a next use
       if (allocationActions.get(index).getNUOp2().contains("Empty")) {
         // remove from the mapping
@@ -211,6 +332,24 @@ public class registerAlloc {
       }
       if (registerAvail.empty()) {
         // Spill to register
+        //System.out.println("Next use check for OP2 Register:\t " + allocationActions.get(index).getNUOp2());
+        //System.out.println("loadI \t" + dataMemoryLoc + "\t => \t" + allocationActions.get(index).getVROp2()+"\t //Spilled to memory");
+        
+      //Pick the register with the furtherest next use
+        registerChange = iterateRegisterNextU(registerNextU);
+        
+        //Change the mapping for register Change
+        changeVRegisterMappings(registerVMapped, registerChange,Integer.toString(dataMemoryLoc));
+        
+        
+        //Spill the contents of the furtherest register to memory
+        System.out.println("LoadI \t" + dataMemoryLoc + " => " + registerChange + "\t //Spill (k is minimal)");
+        dataMemoryLoc += 4;
+        
+      //Change the mappings for the virtual and physical register
+        registerVMapped.put(registerName, registerChange);
+        allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+        
       } else {
         String assignRegister = registerAvail.pop();
         registerInUse.push(assignRegister);
@@ -218,6 +357,10 @@ public class registerAlloc {
 
         // write the PR to opcode1 location
         allocationActions.get(index).setPROp2(registerVMapped.get(registerName));
+        
+        //update the next use for the register in the hashmap
+        registerNextU.put(registerVMapped.get(registerName), allocationActions.get(index).getNUOp2());
+        
         if (allocationActions.get(index).getNUOp2().contains("Empty")) {
           // remove from the mapping
           String freedRegister1 = registerVMapped.remove(registerName);
@@ -233,13 +376,40 @@ public class registerAlloc {
   }
 
 
+  /**
+   * @param registerName: Virtual Register for Operation 1 is passed in.
+   * @param index
+   */
   public static void performAllocationOP1(String registerName, int index) {
+    String registerChange = "OpenRegister";
 
     // check to see if the virtual register is assigned to physical register
     if (registerVMapped.containsKey(allocationActions.get(index).getVROp1())) {
-
+      /**
+       * Need another if statement to load from memory
+       * */
+      /**if(allocationActions.get(index).getVROp2().contains("r") && !allocationActions.get(index).getPROp1().contains("r")){
+      //Pick the register with the furtherest next use
+        registerChange = iterateRegisterNextU(registerNextU);
+        
+        //Change the mapping for register Change
+        changeVRegisterMappings(registerVMapped, registerChange,Integer.toString(dataMemoryLoc));
+        
+        
+        //Spill the contents of the furtherest register to memory
+        System.out.println("LoadI \t" + dataMemoryLoc + "\t \t => \t " + registerChange + "\t //Spill (k is minimal)");
+        dataMemoryLoc += 4;
+        
+      //Change the mappings for the virtual and physical register
+        registerVMapped.put(registerName, registerChange);
+        allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+      } */
+      
       // write the PR to opcode1 location
       allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+      
+      //update the next use for the register in the hashmap
+      registerNextU.put(registerVMapped.get(registerName), allocationActions.get(index).getNUOp1());
 
       // check to see if there is a next use
       if (allocationActions.get(index).getNUOp1().contains("Empty")) {
@@ -255,6 +425,23 @@ public class registerAlloc {
       // check to see there are available registers
       if (registerAvail.empty()) {
         // Spill to register
+        //System.out.println("Next use check for OP1 Register:\t " + allocationActions.get(index).getNUOp1());
+        
+      //Pick the register with the furtherest next use
+        registerChange = iterateRegisterNextU(registerNextU);
+        
+        //Change the mapping for register Change
+        changeVRegisterMappings(registerVMapped, registerChange,Integer.toString(dataMemoryLoc));
+        
+        
+        //Spill the contents of the furtherest register to memory
+        System.out.println("LoadI \t" + dataMemoryLoc + "\t \t => \t " + registerChange + "\t //Spill (k is minimal)");
+        dataMemoryLoc += 4;
+        
+      //Change the mappings for the virtual and physical register
+        registerVMapped.put(registerName, registerChange);
+        allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+        
       } else {
         String assignRegister = registerAvail.pop();
         registerInUse.push(assignRegister);
@@ -262,6 +449,10 @@ public class registerAlloc {
 
         // write the PR to opcode1 location
         allocationActions.get(index).setPROp1(registerVMapped.get(registerName));
+        
+        //update the next use for the register in the hashmap
+        registerNextU.put(registerVMapped.get(registerName), allocationActions.get(index).getNUOp1());
+        
         if (allocationActions.get(index).getNUOp1().contains("Empty")) {
           // remove from the mapping
           String freedRegister1 = registerVMapped.remove(registerName);
@@ -314,6 +505,7 @@ public class registerAlloc {
       // add to the set
       registerAvail.add(regName);
       registerLinesUsage.put(regName, "Empty");
+      registerNextU.put(regName, "Empty");
       regName = "pr";
     }
     return true;
@@ -909,6 +1101,20 @@ public class registerAlloc {
     return false;
   }
 
+  /**
+   * Prints out the registers and the lines that they
+   * were lasted used.
+   * 
+   * @param mp
+   */
+  public static void printMap(HashMap<String,String> mp) {
+    Iterator it = mp.entrySet().iterator();
+    while (it.hasNext()) {
+        Map.Entry pairs = (Map.Entry)it.next();
+        System.out.println(pairs.getKey() + " = " + pairs.getValue());
+    }
+}
+  
   /**
    * Sorts the microsyntax into the vector.
    * 
